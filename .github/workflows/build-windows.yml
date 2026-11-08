@@ -1,0 +1,31 @@
+name: Build Windows exporter
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'windows/**'
+      - '.github/workflows/build-windows.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+      - name: Install dependencies
+        run: python -m pip install -r windows/requirements.txt pyinstaller
+      - name: Build executable
+        run: python -m PyInstaller --noconfirm --onefile --windowed --name iPhone-App-Apple-ID windows/export_apps.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iPhone-App-Apple-ID-Windows
+          path: dist/iPhone-App-Apple-ID.exe
+          if-no-files-found: error

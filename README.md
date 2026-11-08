@@ -6,6 +6,12 @@
 
 提交到 main 后，打开 GitHub 的 **Actions → Build IPA**，进入成功的构建，从 **Artifacts → iOS-App-Check** 下载压缩包。解压得到 `iOS-App-Check.ipa`，用自己的签名工具安装。也可以在 Actions 页面手动运行构建。
 
+## Windows 批量导出
+
+从 GitHub Actions 的 **Build Windows exporter** 下载 **iPhone-App-Apple-ID-Windows**，解压后双击 EXE。用数据线连接并解锁 iPhone，在手机上点「信任」，然后点「查询并导出 TXT」。需要 Windows 上的 Apple 设备驱动。
+
+TXT 以制表符分隔，仅包含「App 名称」和「Apple ID」两列。没有读取到 Apple ID 的应用仍会列出，第二列留空。
+
 ## iPhone 17 首次设置
 
 1. 在 iPhone 开启开发者模式，按系统提示重启并确认。
