@@ -1,5 +1,6 @@
 import Foundation
 import SwiftUI
+import UIKit
 import UniformTypeIdentifiers
 
 struct InstalledApp: Decodable, Identifiable, Sendable {
@@ -34,6 +35,45 @@ struct TXTReport: FileDocument {
     }
 }
 
+private struct PairingFilePicker: UIViewControllerRepresentable {
+    let onPick: (URL) -> Void
+    let onCancel: () -> Void
+
+    func makeUIViewController(context: Context) -> UIDocumentPickerViewController {
+        let picker = UIDocumentPickerViewController(forOpeningContentTypes: [.item], asCopy: true)
+        picker.delegate = context.coordinator
+        return picker
+    }
+
+    func updateUIViewController(_ picker: UIDocumentPickerViewController, context: Context) {}
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(onPick: onPick, onCancel: onCancel)
+    }
+
+    final class Coordinator: NSObject, UIDocumentPickerDelegate {
+        let onPick: (URL) -> Void
+        let onCancel: () -> Void
+
+        init(onPick: @escaping (URL) -> Void, onCancel: @escaping () -> Void) {
+            self.onPick = onPick
+            self.onCancel = onCancel
+        }
+
+        func documentPicker(_ controller: UIDocumentPickerViewController, didPickDocumentsAt urls: [URL]) {
+            guard let url = urls.first else {
+                onCancel()
+                return
+            }
+            onPick(url)
+        }
+
+        func documentPickerWasCancelled(_ controller: UIDocumentPickerViewController) {
+            onCancel()
+        }
+    }
+}
+
 @main
 struct AppCheck: App {
     var body: some Scene {
@@ -49,6 +89,8 @@ struct ResultsView: View {
     @State private var importing = false
     @State private var exporting = false
     @State private var editing = false
+    @State private var importAfterSettings = false
+    @State private var pairingImported = false
     @State private var error: String?
     @State private var report = TXTReport(text: "")
     @State private var lastScan: Date?
@@ -77,6 +119,7 @@ struct ResultsView: View {
             List {
                 Section {
                     if reading { ProgressView("正在读取已安装的 App…") }
+                    if pairingImported { Label("配对文件已导入", systemImage: "checkmark.circle") }
                     if let error { Text(error).foregroundStyle(.red) }
                     if let lastScan {
                         let known = apps.filter { $0.apple_id != nil }.count
@@ -86,7 +129,7 @@ struct ResultsView: View {
                     }
                     if !reading && lastScan == nil {
                         Text("首次导入此 iPhone 的 Remote Pairing 文件，并连接 LocalDevVPN。")
-                        Button("导入配对文件") { importing = true }
+                        Button("导入配对文件") { importing = true }.disabled(reading)
                     }
                     Button("重新查询", action: scan).disabled(reading)
                 }
@@ -118,16 +161,21 @@ struct ResultsView: View {
                 scan()
             }
         }
-        .sheet(isPresented: $editing) {
+        .sheet(isPresented: $editing, onDismiss: {
+            if importAfterSettings {
+                importAfterSettings = false
+                importing = true
+            }
+        }) {
             NavigationStack {
                 Form {
                     TextField("设备 IPv4 地址:端口", text: $address)
                         .textInputAutocapitalization(.never).autocorrectionDisabled()
                     Text("填 LocalDevVPN 设置里的 Device IP，端口默认 49152。")
                     Button("更换配对文件") {
+                        importAfterSettings = true
                         editing = false
-                        importing = true
-                    }
+                    }.disabled(reading)
                 }
                 .navigationTitle("连接设置")
                 .toolbar {
@@ -137,24 +185,13 @@ struct ResultsView: View {
                 }
             }
         }
-        .fileImporter(isPresented: $importing, allowedContentTypes: [.data]) { result in
-            do {
-                let source = try result.get()
-                let scoped = source.startAccessingSecurityScopedResource()
-                defer { if scoped { source.stopAccessingSecurityScopedResource() } }
-                let data = try Data(contentsOf: source)
-                try FileManager.default.createDirectory(
-                    at: pairingFile.deletingLastPathComponent(), withIntermediateDirectories: true
-                )
-                try data.write(to: pairingFile, options: [.atomic, .completeFileProtection])
-                var url = pairingFile
-                var attributes = URLResourceValues()
-                attributes.isExcludedFromBackup = true
-                try url.setResourceValues(attributes)
-                scan()
-            } catch {
-                self.error = "导入配对文件失败：\(error.localizedDescription)"
-            }
+        .sheet(isPresented: $importing) {
+            PairingFilePicker(onPick: { url in
+                importing = false
+                importPairingFile(url)
+            }, onCancel: {
+                importing = false
+            })
         }
         .fileExporter(
             isPresented: $exporting, document: report,
@@ -163,6 +200,29 @@ struct ResultsView: View {
             if case .failure(let failure) = result {
                 error = "导出失败：\(failure.localizedDescription)"
             }
+        }
+    }
+
+    private func importPairingFile(_ source: URL) {
+        do {
+            let data = try Data(contentsOf: source)
+            guard let record = try? PropertyListSerialization.propertyList(from: data, format: nil) as? [String: Any],
+                  (record["public_key"] as? Data)?.count == 32,
+                  (record["private_key"] as? Data)?.count == 32,
+                  let identifier = record["identifier"] as? String, !identifier.isEmpty else {
+                error = "请选择 idevice_pair 通过 Remote pairing 导出的文件。"
+                return
+            }
+            var directory = pairingFile.deletingLastPathComponent()
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            var attributes = URLResourceValues()
+            attributes.isExcludedFromBackup = true
+            try directory.setResourceValues(attributes)
+            try data.write(to: pairingFile, options: [.atomic, .completeFileProtection])
+            pairingImported = true
+            scan()
+        } catch {
+            self.error = "导入配对文件失败：\(error.localizedDescription)"
         }
     }
 
