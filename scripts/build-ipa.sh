@@ -10,6 +10,13 @@ cargo build --locked --manifest-path backend/Cargo.toml --release --target aarch
 product="$PWD/build/Payload/AppCheck.app"
 mkdir -p "$product"
 cp App/Info.plist "$product/Info.plist"
+icon_plist="$PWD/build/app-icon-info.plist"
+xcrun --sdk iphoneos actool --compile "$product" --platform iphoneos \
+  --minimum-deployment-target "$IPHONEOS_DEPLOYMENT_TARGET" --target-device iphone \
+  --app-icon AppIcon --output-partial-info-plist "$icon_plist" App/Assets.xcassets
+/usr/libexec/PlistBuddy -c "Merge $icon_plist" "$product/Info.plist"
+/usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundlePrimaryIcon" "$product/Info.plist"
+test -s "$product/Assets.car"
 xcrun --sdk iphoneos swiftc -swift-version 5 -parse-as-library -O \
   -target arm64-apple-ios17.0 -sdk "$SDKROOT" \
   -import-objc-header App/Bridge.h App/AppCheck.swift \
